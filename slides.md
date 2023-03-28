@@ -103,7 +103,7 @@ PerfDog的Jank计算方法 (同时满足两条件)
 ---
 layout: image-right
 
-image: ../res/img/kadun.jpeg
+image: /kadun.png
 
 ---
 ## 引起卡顿的原因
@@ -174,23 +174,32 @@ Systrace 中执行线程时间片颜色解析
 
 <style>
   div {
-    background:#95e1d3;
+    background:#eeeeee;
+  }
+</style>
+
+---
+
+<div>
+  <img src="/launcher-analyze.png" border="rounded" style="width:50%"/>
+</div>
+
+
+这里launcher的主线程被background.statics.boot阻塞。UI thread需要调用MessageQueue的removeMessages方法，但是这时MessageQueue的同步锁被background.statics.boot线程的MessageQueue.enqueueMessage方法持有，导致UI线程进入锁池等待。进而影响这一帧的整体时长超过了16.6ms，产生了Jank。
+
+通过上面现象进行问题定位分析：主线程MessageQueue的锁被子线程background.statics.boot持有，说明该子线程内部有调用了主线程的handler来处理问题导致子线程持锁。代码中对子线程内部处理代码逐个排查，发现有可疑点如上图所示
+
+<style>
+  p {
+    text-indent:2em;
   }
 </style>
 
 
 ---
-layout: image-left
-
-image: res/img/launcher-analyze.png
-
----
-这里launcher的主线程被background.statics.boot阻塞。UI thread需要调用MessageQueue的removeMessages方法，但是这时MessageQueue的同步锁被background.statics.boot线程的MessageQueue.enqueueMessage方法持有，导致UI线程进入锁池等待。进而影响这一帧的整体时长超过了16.6ms，产生了Jank。
-
-通过上面现象进行问题定位分析：主线程MessageQueue的锁被子线程background.statics.boot持有，说明该子线程内部有调用了主线程的handler来处理问题导致子线程持锁。代码中对子线程内部处理代码逐个排查，发现有可疑点如左图所示
----
 
 ### 内存相关理论和原理
+
 <br>
 <div grid="~ cols-2 gap-2">
 	<div style="box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);width:80%;margin-bottom: 25px;">
@@ -414,10 +423,10 @@ layout: two-cols
     text-indent:2em;
   }
 </style>
-
-<div>
+<div align="center">
   <img src="/mark-sweep.gif" border="rounded" style="width:45%"/>
 </div>
+
 
 优点：执行效率高 
 
@@ -429,9 +438,11 @@ layout: two-cols
 
 结合了以上两个算法，为了避免缺陷而提出。标记阶段和 Mark-Sweep 算法相同，标记后不是清理对象，而是将存活对象移向内存的一端。然后清除端边界外的对象。如图：
 
-<div>
-  <img src="/mark-sweep.gif" border="rounded" style="width:45%"/>
+<div align="center">
+  <img src="/mark-compact.gif" border="rounded" style="width:45%"/>
 </div>
+
+
 
 优点： 没有内存碎片，内存使用率高
 
@@ -442,3 +453,113 @@ layout: two-cols
     text-indent:2em;
   }
 </style>
+---
+layout: cover
+---
+
+# 分代收集算法
+根据不同代，采用上述不同的算法。分代收集法是目前大部分 JVM 所采用的方法，其核心思想是根据对象存活的不同生命周期将内存划分为不同的域。老生代的特点是每次垃圾回收时只有少量对象需要被回收，新生代的特点是每次垃圾回收时都有大量垃圾需要被回收，因此可以根据不同区域选择不同的算法。
+
+新生代使用复制算法，老年代使用标记整理算法
+
+---
+
+## 开源APM方案预判内存泄漏
+
+**主动检测法**
+
+LeakCanary中的实现
+
+- Activity 的检测预判
+- Service 的检测预判
+- Bitmap 大图的检测预判
+
+1、Activity 的检测预判 LeakCanary 中对 Activity 的预判是在 onDestroy 生命周期中通过弱引用队列来持有当前 Activity 引用，如果在主动触发 gc 之后，泄漏对象集合中仍然能找到该引用实例，则说明发生了内存泄漏，就开始 dump 
+
+2、Service 的检测预判 LeakCanary 对 Service 的内存泄漏检测时机，是 hook 监听 ActivityThread 的 stopService，然后记录这个 binder 到弱引用集合中，然后代理 AMS 的 serviceDoneExecuting 方法，通过 binder 在弱引用集合中去移除，移除成功的话，说明发生了内存泄漏，就开始 dump 
+
+3、Bitmap 大图检测预判 Bitmap 不像 Activity、Service 这种，能够通过生命周期主动监测当前是否有内存泄漏的可能，他一般是在 Activity、Service 发生泄漏 dump 的时候，顺便检测一下 Bitmap 。在 Koom 中，Bitmap 大图检测是分析 hprof 中是否有超过 Bitmap 设置的阈值 size (width * height) 
+
+**阈值检测法**
+
+阈值检测法的代表框架是 Koom，他抛弃了 LeakCanary 的实时检测性，采用定时轮训检测当前内存是否在不断累加，增长达到一定次数(可自己配置)时会进行 dump hprof，这种方式会牺牲一定的时效性，但对于应用到线上的 Koom 的框架，他完全不需要这么高的时效性
+
+<style>
+  div {
+    font-size: 12px
+  }
+</style>
+
+---
+
+**shallow heap和retained heap**
+
+shallow heap 表示对象本身占用的内存大小，不包括它引用的实例。
+
+```shell
+Shallow Size = [类定义] + 父类fields所占空间 + 自身fields所占空间 + [alignment]
+```
+
+类定义固定为8byte，field分基本类型和引用类型，引用固定为4byte，基本类型和系统有关，32位系统int=4byte
+
+retained heap 自身内存加上引用的内存
+
+<div align="center">
+  <img src="/heap.png" style="width:30%"/>
+</div>
+
+假设O1-O4的shallow heap都是1kb，以下为retained heap值
+
+O1: 没有引用，1kb<br>O3: 引用O4， 2kb<br>O2: 引用O3，但是O1引用O3，所以O2释放O3不一定释放，1kb<br>O1: 引用O2、O3，O3引用O4，所以值为 4kb
+
+<style>
+  p {
+    font-size: 16px;
+    line-height: 14px;
+  }
+</style>
+
+---
+
+## JVM知识点补充
+
+JVM有基于栈的指令集和基于寄存器的指令集<br>android平台的Dalvik VM就是基于寄存器的虚拟机
+
+案例演示
+
+```shell
+javap -c -v Accumulate
+Code:
+      stack=2, locals=3, args_size=1
+         0: iconst_0
+         1: istore_1
+         2: iconst_1
+         3: istore_2
+         4: iload_2
+         5: bipush        11
+         7: if_icmpge     20
+        10: iload_1
+        11: iload_2
+        12: iadd
+        13: istore_1
+        14: iinc          2, 1
+        17: goto          4
+        20: iload_1
+        21: ireturn
+```
+
+<style>
+  p {
+    font-size: 10px;
+  }
+</style>
+
+---
+
+JVM基于栈的指令集动画演示
+
+<div align="center">
+  <img src="/output.gif" style="width:60%"/>
+</div>
+
+8位CPU运行演示
