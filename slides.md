@@ -102,9 +102,7 @@ PerfDog的Jank计算方法 (同时满足两条件)
 
 ---
 layout: image-right
-
 image: /kadun.png
-
 ---
 ## 引起卡顿的原因
 ### 内存方面
