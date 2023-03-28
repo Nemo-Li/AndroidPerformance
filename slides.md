@@ -1,6 +1,6 @@
 ---
 # try also 'default' to start simple
-theme: seriph
+theme: default
 # random image from a curated Unsplash collection by Anthony
 # like them? see https://unsplash.com/collections/94734566/slidev
 background: https://source.unsplash.com/collection/94734566/1920x1080
@@ -27,21 +27,19 @@ css: unocss
 
 # 性能检测利器和APM方案
 
-全面了解现有性能检测手段，量化性能指标，分析Matrix源码
+全面了解现有性能检测手段，量化性能指标，分析一些案例，以及分析有名APM方案实现的原理
 
 <div class="pt-12">
   <span @click="$slidev.nav.next" class="px-2 py-1 rounded cursor-pointer" hover="bg-white bg-opacity-10">
     让我们开始吧 <carbon:arrow-right class="inline"/>
   </span>
 </div>
-
 <div class="abs-br m-6 flex gap-2">
-  <a href="https://github.com/slidevjs/slidev" target="_blank" alt="GitHub"
+  <a href="https://github.com/Nemo-Li/AndroidPerformance" target="_blank" alt="GitHub"
     class="text-xl slidev-icon-btn opacity-50 !border-none !hover:text-white">
     <carbon-logo-github />
   </a>
 </div>
-
 <!--
 The last comment block of each slide will be treated as slide notes. It will be visible and editable in Presenter Mode along with the slide. [Read more in the docs](https://sli.dev/guide/syntax.html#notes)
 -->
@@ -50,356 +48,397 @@ The last comment block of each slide will be treated as slide notes. It will be 
 transition: fade-out
 ---
 
-# 性能检测方式?
+**卡顿**
 
-Slidev is a slides maker and presenter designed for developers, consist of the following features
+应用优化最主要的方面是卡顿优化，内存和CPU都会对卡顿产生影响。本次分享从卡顿入手，引申出内存和CPU对卡顿的影响原理以及具体案例的分析
 
-- 📝 **Text-based** - focus on the content with Markdown, and then style them later
-- 🎨 **Themable** - theme can be shared and used with npm packages
-- 🧑‍💻 **Developer Friendly** - code highlighting, live coding with autocompletion
-- 🤹 **Interactive** - embedding Vue components to enhance your expressions
-- 🎥 **Recording** - built-in recording and camera view
-- 📤 **Portable** - export into PDF, PNGs, or even a hostable SPA
-- 🛠 **Hackable** - anything possible on a webpage
+**卡顿的定义**
 
-<br>
-<br>
+卡顿从视觉层面分析的直接原因为从屏幕看到的画面出现了多帧相同的情况。即通常说的掉帧，当前需要显示的帧没有准备好而显示了上一帧。
 
-Read more about [Why Slidev?](https://sli.dev/guide/why)
+从程序运行角度，程序运行耗时，画面渲染数据在垂直同步信号来时没有准备完成。
 
-<!--
-You can have `style` tag in markdown to override the style for the current page.
-Learn more: https://sli.dev/guide/syntax#embedded-styles
--->
+💡 帧率越高越流畅吗？
+
+由于人类视觉暂留对变化比较敏感，所以稳定的FPS流畅，不稳定的FPS就比较卡顿。所以并不是帧率越高越流畅，需要保证有一个稳定的帧率。Android的垂直同步信号就是为了能够按照稳定的屏幕刷新率进行界面展示。
+
+因此，对于大多数的Android设备来说，渲染帧数据需要在16.6ms内准备完毕，这样才能保证稳定的60FPS运行。*当然如果卡顿的很稳定，画面可以稳定在一个固定的FPS，应该也是显示流畅的*
+
+卡顿都是表现在动画过程中，静止界面看不出卡顿
 
 <style>
-h1 {
-  background-color: #2B90B6;
-  background-image: linear-gradient(45deg, #4EC5D4 10%, #146b8c 20%);
-  background-size: 100%;
-  -webkit-background-clip: text;
-  -moz-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  -moz-text-fill-color: transparent;
-}
+  p {
+    font-color:#ff0000;
+  }
 </style>
 
 <!--
-Here is another comment.
+屏幕刷新率和vsync频率有关系吗？ 一个是屏幕硬件刷新画面的频率，一个是系统发送交换前后缓冲区的频率。理论上并没有绑定关系，只是一般情况下两者相等
+
 -->
 
 ---
 transition: slide-up
 ---
 
-# Navigation
+**卡顿的标准**
 
-Hover on the bottom-left corner to see the navigation's controls panel, [learn more](https://sli.dev/guide/navigation.html)
+参考Google的Android Vitals性能指标和腾讯的PrefDog性能指标，给出通用应用和游戏的参考标准
 
-### Keyboard Shortcuts
+**通用应用卡顿**
 
-|     |     |
-| --- | --- |
-| <kbd>right</kbd> / <kbd>space</kbd>| next animation or slide |
-| <kbd>left</kbd>  / <kbd>shift</kbd><kbd>space</kbd> | previous animation or slide |
-| <kbd>up</kbd> | previous slide |
-| <kbd>down</kbd> | next slide |
+Google Vitals定义了两种卡顿程度
 
-<!-- https://sli.dev/guide/animations.html#click-animations -->
-<img
-  v-click
-  class="absolute -bottom-9 -left-7 w-80 opacity-50"
-  src="https://sli.dev/assets/arrow-bottom-left.svg"
-/>
-<p v-after class="absolute bottom-23 left-45 opacity-30 transform -rotate-10">Here!</p>
+- **呈现速度缓慢**： 当超过50%的帧呈现时间超过16ms，用户感官明显卡顿
+- **帧冻结**：绘制耗时超过700ms，为严重卡顿问题
+- **卡顿忽略**： fps≤2的画面，人眼的视觉暂留100~400ms，对应fps为2.5~10之间。所以fps低于3，人眼看到的不是连续动作，即使有丢帧也不会察觉。
+
+**游戏应用的卡顿**
+
+PerfDog的Jank计算方法 (同时满足两条件) 
+
+- **普通卡顿 Jank**  (1)当前帧耗时>前三帧平均耗时2倍 (2)当前帧耗时>两帧电影帧耗时(1000ms/24*2 = 84ms)
+- **严重卡顿 BigJank**   (1)当前帧耗时>前三帧平均耗时2倍  (2)当前帧耗时>三帧电影帧耗时(125ms)
+
 ---
 layout: image-right
-image: https://source.unsplash.com/collection/94734566/1920x1080
+
+image: ../res/img/kadun.jpeg
+
+---
+## 引起卡顿的原因
+### 内存方面
+
+STW 内存GC引起的STW现象（stop the world）
+
+### CPU
+
+等待CPU时间片，线程过多引起的时间片抢占
+
+IO阻塞时间，锁的问题
+
+所有对主线程有阻塞的操作都会导致卡顿
+
+### 细分卡顿原因
+
+system_server引起的应用卡顿
+
+Input事件处理引起的卡顿
+
 ---
 
-# Code
+## Systrace
 
-Use code snippets and get the highlighting directly![^1]
+Systrace 中执行线程时间片颜色解析
 
-```ts {all|2|1-6|9|all}
-interface User {
-  id: number
-  firstName: string
-  lastName: string
-  role: string
-}
+<div style="width:10px;height:10px;background-color:#AADAB6;display: inline-block;"></div>
+<div style="display: inline-block;padding-left:10px;font-weight:bold">绿色 Running</div>
 
-function updateUser(id: number, update: User) {
-  const user = getUser(id)
-  const newUser = { ...user, ...update }
-  saveUser(id, newUser)
-}
-```
+​	线程正在完成与进程相关的工作或正在响应中断。
 
-<arrow v-click="3" x1="400" y1="420" x2="230" y2="330" color="#564" width="3" arrowSize="1" />
+<div style="width:10px;height:10px;background-color:#738DC8;display: inline-block;"></div>
+<div style="display: inline-block;padding-left:10px;font-weight:bold">蓝色 Runnable</div>
 
-[^1]: [Learn More](https://sli.dev/guide/syntax.html#line-highlighting)
+​	该线程可以运行，但当前未安排。（时间片被其它的线程抢占）
+
+<div style="width:10px;height:10px;background-color:#ECECEC;display: inline-block;"></div>
+<div style="display: inline-block;padding-left:10px;font-weight:bold">白色 sleeping</div>
+
+​	线程没有工作要做，可能是因为线程被互斥锁阻塞了。
+
+<div style="width:10px;height:10px;background-color:#FC780A;display: inline-block;"></div>
+<div style="display: inline-block;padding-left:10px;font-weight:bold">橙色 Uninterruptible Sleep - Block I/O</div>
+
+​	线程在 I/O 上阻塞或等待磁盘操作完成。
+
+<div style="width:10px;height:10px;background-color:#A4677C;display: inline-block;"></div>
+<div style="display: inline-block;padding-left:10px;font-weight:bold">紫色 Uninterruptible Sleep</div>
+
+	线程被另一个内核操作阻塞，通常是内存管理。
+---
+
+# 案例分析
+
+## 锁优化
+
+以下针对launcher抓取的systrace文件进行分析
+
+整体来看比较流畅，掉帧情况比较少，下面搜索monitor，针对锁的问题排查原因
+
+<div grid="~ cols-3 gap-2">
+	<img border="rounded" src="/launcher-trace.png">
+	<img border="rounded" src="/mq-one.png">
+	<img border="rounded" src="/mq-two.png">
+</div>
+
 
 <style>
-.footnotes-sep {
-  @apply mt-20 opacity-10;
-}
-.footnotes {
-  @apply text-sm opacity-75;
-}
-.footnote-backref {
-  display: none;
-}
+  div {
+    background:#95e1d3;
+  }
+</style>
+
+
+---
+layout: image-left
+
+image: res/img/launcher-analyze.png
+
+---
+这里launcher的主线程被background.statics.boot阻塞。UI thread需要调用MessageQueue的removeMessages方法，但是这时MessageQueue的同步锁被background.statics.boot线程的MessageQueue.enqueueMessage方法持有，导致UI线程进入锁池等待。进而影响这一帧的整体时长超过了16.6ms，产生了Jank。
+
+通过上面现象进行问题定位分析：主线程MessageQueue的锁被子线程background.statics.boot持有，说明该子线程内部有调用了主线程的handler来处理问题导致子线程持锁。代码中对子线程内部处理代码逐个排查，发现有可疑点如左图所示
+---
+
+### 内存相关理论和原理
+<br>
+<div grid="~ cols-2 gap-2">
+	<div style="box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);width:80%;margin-bottom: 25px;">
+	  <img src="/jvm-memory.jpeg" border="rounded"/>
+	  <div style=" text-align: center;padding: 10px 20px;">
+	  <p>JVM虚拟机内存区域</p>
+	  </div>
+	</div>
+	<div style="font-size:small">
+		<p>JVM 内存区域主要分为线程私有区域【程序计数器、虚拟机栈、本地方法区】、线程共享区域【JAVA 堆、方法区】、直接内存。</p>
+    <p>线程私有数据区域生命周期与线程相同, 依赖用户线程的启动/结束 而 创建/销毁(在 Hotspot VM内, 每个线程都与操作系统的本地线程直接映射, 因此这部分内存区域的存/否跟随本地线程的生/死对应)。</p>
+    <p>线程共享区域随虚拟机的启动/关闭 而 创建/销毁</p>
+    <p><span style="color:red">直接内存并不是 JVM 运行时数据区的一部分,</span> 但也会被频繁的使用: 在 JDK 1.4 引入的 NIO 提供了基于 Channel 与 Buffer 的 IO 方式, 它可以使用 Native 函数库直接分配堆外内存, 然后使用DirectByteBuffer 对象作为这块内存的引用进行操作。这样就避免了在 Java堆和 Native 堆中来回复制数据, 因此在一些场景中可以显著提高性能。 </p>
+    <p style="border-radius:8px;padding:10px;background-color:#eaffd0;background-origin:border-box;font-size:12px">jvm 内存可视化工具jvisualvm，可以查看内存分区具体 <br>
+      /Library/Java/JavaVirtualMachines/jdk1.8.0_172.jdk/Contents/Home/bin
+    </p>
+	</div>
+</div>
+
+---
+
+##### 程序计数器(线程私有)
+
+一块较小的内存空间, 是当前线程所执行的字节码的行号指示器，每条线程都要有一个独立的 
+
+程序计数器，这类内存也称为“线程私有”的内存。
+
+这个内存区域是唯一一个在虚拟机中没有规定任何 OutOfMemoryError 情况的区域。
+
+##### 虚拟机栈（线程私有）
+
+是描述java方法执行的内存模型，每个方法在执行的同时都会创建一个栈帧（Stack Frame） 
+
+用于存储局部变量表、操作数栈、动态链接、方法出口等信息。每一个方法从调用直至执行完成 
+
+的过程，就对应着一个栈帧在虚拟机栈中入栈到出栈的过程。
+
+生命周期与线程相同，每个方法执行同时创建一个栈帧。
+
+HotSpot虚拟机中并不区分虚拟机栈和本地方法栈，两个合二为一
+
+栈深度：栈的高度称为栈的深度，（简单理解：栈总内存/单个栈帧内存）。所以栈深度受栈帧大小影响，栈帧占用内存越大，整个栈的深度就越小
+
+##### 本地方法区（线程私有）  
+
+本地方法区和 Java Stack 作用类似, 区别是虚拟机栈为执行 Java 方法服务, 而本地方法栈则为 
+
+Native 方法服务
+
+##### 堆（Heap-线程共享）-运行时数据区
+
+被线程共享的内存区域，现代VM采用分代收集算法，从GC角度可以细分为：新生代和老年代
+
+方法区/永久代（线程共享）
+
+##### 永久代（Permanent Generation）
+
+用于存储被JVM加载的类信息、常量、静态变量、JIT编译后的代码等数据。HotSpot VM把GC分代收集扩展至方法区。
+
+<style>
+  p {
+    font-size:12px;
+    height:10px;
+    text-indent:1em;
+  }
+  h5 {
+    height:14px;
+  }
+</style>
+---
+
+### JVM运行时内存
+
+<div grid="~ cols-2 gap-2">
+	<img border="rounded" src="/jvm-one.png">
+	<img border="rounded" src="/jvm-two.png">
+</div>
+
+**新生代（Young Generation）**
+
+新生代用来存放新创建的对象，对象创建操作频繁，所以新生代会频繁触发MinorGC进行垃圾回收。新生代分为Eden、ServivorFrom、ServivorTo三个区。
+
+Eden区：新创建对象区，如果新创建对象占用内存很大，直接分配到老年代。当Eden区内存不够就会触发MinorGC，对新生代进行一次垃圾回收
+
+ServivorFrom：上一次GC的幸存者，作为这一次GC的被扫描者。
+
+ServivorTo: 保留了一次MinorGC过程中的幸存者
+
+MinorGC的过程（复制-> 清空 -> 互换）
+
+MinorGC 采用复制算法。
+
+<style>
+  p {
+    font-size:15px;
+  }
 </style>
 
 ---
 
-# Components
+**老年代 （Old Generation）**
 
-<div grid="~ cols-2 gap-4">
-<div>
+主要存放应用程序中生命周期长的内存对象
 
-You can use Vue components directly inside your slides.
+老年代的对象比较稳定，所以 MajorGC 不会频繁执行。在进行 MajorGC 前一般都先进行 
 
-We have provided a few built-in components like `<Tweet/>` and `<Youtube/>` that you can use directly. And adding your custom components is also super easy.
+了一次 MinorGC，使得有新生代的对象晋身入老年代，导致空间不够用时才触发。当无法找到足 
 
-```html
-<Counter :count="10" />
-```
+够大的连续空间分配给新创建的较大对象时也会提前触发一次 MajorGC 进行垃圾回收腾出空间。 
 
-<!-- ./components/Counter.vue -->
-<Counter :count="10" m="t-4" />
+MajorGC 采用标记清除算法：首先扫描一次所有老年代，标记出存活的对象，然后回收没 
 
-Check out [the guides](https://sli.dev/builtin/components.html) for more.
+有标记的对象。MajorGC 的耗时比较长，因为要扫描再回收。MajorGC 会产生内存碎片，为了减 
 
-</div>
-<div>
+少内存损耗，我们一般需要进行合并或者标记出来方便下次直接分配。当老年代也满了装不下的 
 
-```html
-<Tweet id="1390115482657726468" />
-```
+时候，就会抛出 OOM（Out of Memory）异常。
 
-<Tweet id="1390115482657726468" scale="0.65" />
+**永久代 （Permanent Generation）**
 
-</div>
-</div>
+指内存的永久保存区域，主要存放 Class 和 Meta（元数据）的信息,Class 在被加载的时候被 
 
-<!--
-Presenter note with **bold**, *italic*, and ~~striked~~ text.
+放入永久区域，它和和存放实例的区域不同,GC 不会在主程序运行期对永久区域进行清理。所以这 
 
-Also, HTML elements are valid:
-<div class="flex w-full">
-  <span style="flex-grow: 1;">Left content</span>
-  <span>Right content</span>
-</div>
--->
+也导致了永久代的区域会随着加载的 Class 的增多而胀满，最终抛出 OOM 异常。
 
----
-class: px-20
----
-
-# Themes
-
-Slidev comes with powerful theming support. Themes can provide styles, layouts, components, or even configurations for tools. Switching between themes by just **one edit** in your frontmatter:
-
-<div grid="~ cols-2 gap-2" m="-t-2">
-
-```yaml
----
-theme: default
----
-```
-
-```yaml
----
-theme: seriph
----
-```
-
-<img border="rounded" src="https://github.com/slidevjs/themes/blob/main/screenshots/theme-default/01.png?raw=true">
-
-<img border="rounded" src="https://github.com/slidevjs/themes/blob/main/screenshots/theme-seriph/01.png?raw=true">
-
-</div>
-
-Read more about [How to use a theme](https://sli.dev/themes/use.html) and
-check out the [Awesome Themes Gallery](https://sli.dev/themes/gallery.html).
-
----
-preload: false
----
-
-# Animations
-
-Animations are powered by [@vueuse/motion](https://motion.vueuse.org/).
-
-```html
-<div
-  v-motion
-  :initial="{ x: -80 }"
-  :enter="{ x: 0 }">
-  Slidev
-</div>
-```
-
-<div class="w-60 relative mt-6">
-  <div class="relative w-40 h-40">
-    <img
-      v-motion
-      :initial="{ x: 800, y: -100, scale: 1.5, rotate: -50 }"
-      :enter="final"
-      class="absolute top-0 left-0 right-0 bottom-0"
-      src="https://sli.dev/logo-square.png"
-    />
-    <img
-      v-motion
-      :initial="{ y: 500, x: -100, scale: 2 }"
-      :enter="final"
-      class="absolute top-0 left-0 right-0 bottom-0"
-      src="https://sli.dev/logo-circle.png"
-    />
-    <img
-      v-motion
-      :initial="{ x: 600, y: 400, scale: 2, rotate: 100 }"
-      :enter="final"
-      class="absolute top-0 left-0 right-0 bottom-0"
-      src="https://sli.dev/logo-triangle.png"
-    />
-  </div>
-
-  <div
-    class="text-5xl absolute top-14 left-40 text-[#2B90B6] -z-1"
-    v-motion
-    :initial="{ x: -80, opacity: 0}"
-    :enter="{ x: 0, opacity: 1, transition: { delay: 2000, duration: 1000 } }">
-    Slidev
-  </div>
-</div>
-
-<!-- vue script setup scripts can be directly used in markdown, and will only affects current page -->
-<script setup lang="ts">
-const final = {
-  x: 0,
-  y: 0,
-  rotate: 0,
-  scale: 1,
-  transition: {
-    type: 'spring',
-    damping: 10,
-    stiffness: 20,
-    mass: 2
+<style>
+  p {
+    font-size:15px;
+    height:18px;
   }
-}
-</script>
-
-<div
-  v-motion
-  :initial="{ x:35, y: 40, opacity: 0}"
-  :enter="{ y: 0, opacity: 1, transition: { delay: 3500 } }">
-
-[Learn More](https://sli.dev/guide/animations.html#motion)
-
-</div>
+</style>
 
 ---
 
-# LaTeX
-
-LaTeX is supported out-of-box powered by [KaTeX](https://katex.org/).
+### 确认垃圾对象
 
 <br>
 
-Inline $\sqrt{3x-1}+(1+x)^2$
+**引用计数法**
 
-Block
-$$
-\begin{array}{c}
+Java中，引用和对象是有关联的。如果要操作对象则必须用引用进行。因此，很显然一个简单 
 
-\nabla \times \vec{\mathbf{B}} -\, \frac1c\, \frac{\partial\vec{\mathbf{E}}}{\partial t} &
-= \frac{4\pi}{c}\vec{\mathbf{j}}    \nabla \cdot \vec{\mathbf{E}} & = 4 \pi \rho \\
+的办法是通过引用计数来判断一个对象是否可以回收。引用计数为0则可以进行回收，在C++中，智能指针就是通过引用计数来进行内存回收的
 
-\nabla \times \vec{\mathbf{E}}\, +\, \frac1c\, \frac{\partial\vec{\mathbf{B}}}{\partial t} & = \vec{\mathbf{0}} \\
+**可达性分析**
 
-\nabla \cdot \vec{\mathbf{B}} & = 0
+为了解决引用计数法的循环引用问题，Java 使用了可达性分析的方法。通过一系列的“GC roots” 
 
-\end{array}
-$$
+对象作为起点搜索。如果在“GC roots”和一个对象之间没有可达路径，则称该对象是不可达的。
 
-<br>
-
-[Learn more](https://sli.dev/guide/syntax#latex)
+要注意的是，不可达对象不等价于可回收对象，不可达对象变为可回收对象至少要经过两次标记过程。两次标记后仍然是可回收对象，则将面临回收。
 
 ---
 
-# Diagrams
+**GC root对象：**
 
-You can create diagrams / graphs from textual descriptions, directly in your Markdown.
+1. **虚拟机栈中引用的对象**
+   - 各个线程被调用的方法中使用到的参数、局部变量
+2. **本地方法栈内JNI引用的对象**
+3. **方法区中类静态属性引用的对象**
+   - Java类中引用类型的静态成员变量
+4. **方法区中常量引用的对象**
+   - 字符串常量池里的引用
+5. **所有被同步锁synchronized持有的对象**
+6. **Java虚拟机内部的引用**
+   - 基本数据类型对应的Class对象，一些常驻的异常对象（如：NullPointerException、OutOfMemoryError），系统类加载器。
+7. **反映java虚拟机内部情况的JMXBean、JVMTI中注册的回调、本地代码缓存等**
+8. **除了这些固定的GCRoots集合以外，根据用户所选用的垃圾收集器以及当前回收的内存区域不同，还可以有其他对象“临时性”地加入，共同构成完整GC Roots集合。比如：分代收集和局部回收（Partial GC）。**
 
-<div class="grid grid-cols-3 gap-10 pt-4 -mb-6">
+**小结：常见的root就是栈中的变量和静态变量**
 
-```mermaid {scale: 0.5}
-sequenceDiagram
-    Alice->John: Hello John, how are you?
-    Note over Alice,John: A typical interaction
-```
-
-```mermaid {theme: 'neutral', scale: 0.8}
-graph TD
-B[Text] --> C{Decision}
-C -->|One| D[Result 1]
-C -->|Two| E[Result 2]
-```
-
-```plantuml {scale: 0.9}
-@startuml
-
-package "Some Group" {
-  HTTP - [First Component]
-  [Another Component]
-}
-
-node "Other Groups" {
-  FTP - [Second Component]
-  [First Component] --> FTP
-}
-
-cloud {
-  [Example 1]
-}
-
-
-database "MySql" {
-  folder "This is my folder" {
-    [Folder 3]
+<style>
+  div {
+    font-size:16px;
+    height:18px;
   }
-  frame "Foo" {
-    [Frame 4]
+</style>
+---
+layout: two-cols
+---
+
+#### 垃圾回收算法
+
+##### 复制算法（copying）
+
+1. eden、servivorFrom复制到servivorTo，年龄加1
+
+首先，把 Eden 和 ServivorFrom 区域中存活的对象复制到 ServivorTo 区域（如果有对象的年龄已经达到了老年的标准，则赋值到老年代区），同时把这些对象的年龄+1（如果 ServivorTo 不够位置了就放到老年区）；
+
+2. 清空eden、servivorFrom
+
+然后清空eden和servivorFrom中的对象
+
+3. servivorFrom和servivorTo互换
+
+最后，ServicorTo 和 ServicorFrom 互换，原 ServicorTo 成为下一次 GC 时的 ServicorFrom区
+
+::right::
+
+![](/copying.gif)
+
+优点：实现简单，内存效率高，不易产生碎片
+
+缺点：可用内存被压缩，存活对象较多的话，copying算法的效率会比较低
+
+<style>
+  p {
+    margin-right:20px;
   }
-}
+</style>
 
+---
 
-[Another Component] --> [Example 1]
-[Example 1] --> [Folder 3]
-[Folder 3] --> [Frame 4]
+##### 标记清除算法（Mark-Sweep）
 
-@enduml
-```
+最基础的垃圾回收算法，分为两个阶段，标注和清除。标记阶段标记出所有需要回收的对象，清除阶段回收被标记的对象所占用的空间。如图:
 
+<style>
+  p {
+    text-indent:2em;
+  }
+</style>
+
+<div>
+  <img src="/mark-sweep.gif" border="rounded" style="width:45%"/>
 </div>
 
-[Learn More](https://sli.dev/guide/syntax.html#diagrams)
+优点：执行效率高 
 
-
----
-src: ./pages/multiple-entries.md
-hide: false
----
+缺点：内存的碎片化比较严重
 
 ---
-layout: center
-class: text-center
----
 
-# Learn More
+**标记整理算法（Mark-Compact）**
 
-[Documentations](https://sli.dev) · [GitHub](https://github.com/slidevjs/slidev) · [Showcases](https://sli.dev/showcases.html)
+结合了以上两个算法，为了避免缺陷而提出。标记阶段和 Mark-Sweep 算法相同，标记后不是清理对象，而是将存活对象移向内存的一端。然后清除端边界外的对象。如图：
+
+<div>
+  <img src="/mark-sweep.gif" border="rounded" style="width:45%"/>
+</div>
+
+优点： 没有内存碎片，内存使用率高
+
+缺点： 执行效率比Mark-Sweep低
+
+<style>
+  p {
+    text-indent:2em;
+  }
+</style>
