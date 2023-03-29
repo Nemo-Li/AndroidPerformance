@@ -45,14 +45,32 @@ The last comment block of each slide will be treated as slide notes. It will be 
 -->
 
 ---
+
+# 一些概念
+
+从技术上来说，以下3大类问题用户感知上都是卡顿
+
+## 流畅度(Smooth vs Jank)
+
+滑动列表的时候掉帧、窗口动画不连贯、重启手机进入桌面卡顿
+
+## 响应速度(Slow)
+
+应用启动白屏过长、点击电源键亮屏慢、滑动不跟手
+
+## 稳定性(ANR)
+
+界面操作没有反应然后闪退、点击图标没有响应
+
+---
 transition: fade-out
 ---
 
-**卡顿**
+### **卡顿**
 
 应用优化最主要的方面是卡顿优化，内存和CPU都会对卡顿产生影响。本次分享从卡顿入手，引申出内存和CPU对卡顿的影响原理以及具体案例的分析
 
-**卡顿的定义**
+### **卡顿的定义**
 
 卡顿从视觉层面分析的直接原因为从屏幕看到的画面出现了多帧相同的情况。即通常说的掉帧，当前需要显示的帧没有准备好而显示了上一帧。
 
@@ -62,16 +80,15 @@ transition: fade-out
 
 由于人类视觉暂留对变化比较敏感，所以稳定的FPS流畅，不稳定的FPS就比较卡顿。所以并不是帧率越高越流畅，需要保证有一个稳定的帧率。Android的垂直同步信号就是为了能够按照稳定的屏幕刷新率进行界面展示。
 
-因此，对于大多数的Android设备来说，渲染帧数据需要在16.6ms内准备完毕，这样才能保证稳定的60FPS运行。*当然如果卡顿的很稳定，画面可以稳定在一个固定的FPS，应该也是显示流畅的*
+因此，对于大多数的Android设备来说，渲染帧数据需要在16.6ms内准备完毕，这样才能保证稳定的60FPS运行。<span color="red">当然如果卡顿的很稳定，画面可以稳定在一个固定的FPS，应该也是显示流畅的</span>
 
 卡顿都是表现在动画过程中，静止界面看不出卡顿
 
 <style>
   p {
-    font-color:#ff0000;
+    text-indent:2em;
   }
 </style>
-
 <!--
 屏幕刷新率和vsync频率有关系吗？ 一个是屏幕硬件刷新画面的频率，一个是系统发送交换前后缓冲区的频率。理论上并没有绑定关系，只是一般情况下两者相等
 
@@ -101,27 +118,87 @@ PerfDog的Jank计算方法 (同时满足两条件)
 - **严重卡顿 BigJank**   (1)当前帧耗时>前三帧平均耗时2倍  (2)当前帧耗时>三帧电影帧耗时(125ms)
 
 ---
-layout: image-right
-image: /kadun.png
+layout: two-cols
 ---
-## 引起卡顿的原因
-### 内存方面
+### 引起卡顿的原因
+#### 流程执行异常
 
-STW 内存GC引起的STW现象（stop the world）
+- system_server引起应用卡顿
+- Input事件处理引起卡顿
+- 应用UI线程耗时引起卡顿
+- SurfaceFlinger耗时引起卡顿
 
-### CPU
+#### 系统负载异常
 
-等待CPU时间片，线程过多引起的时间片抢占
+- CPU调度引起卡顿
+- GPU调度引起卡顿
+- 低内存引起卡顿
+- 磁盘I/O引起卡顿
 
-IO阻塞时间，锁的问题
+#### 编译引起卡顿性能问题
 
-所有对主线程有阻塞的操作都会导致卡顿
+- 代码解释执行耗时
+- 编译本身耗时
 
-### 细分卡顿原因
+###### [Android卡顿掉帧问题分析实战篇](https://www.jianshu.com/p/f1a777551b70)
 
-system_server引起的应用卡顿
+<style>
+  h6 {
+    font-size: 10px;
+  }
+  h4 {
+    margin-top: 0.2em;
+    margin-bottom: 0.2em;
+  }
+</style>
 
-Input事件处理引起的卡顿
+
+::right::
+
+<div>
+  <img src="/kadun.png" style="width:65%;margin-left:50px"/>
+</div>
+
+<!--
+system_server引起应用卡顿:
+
+框架`system_server`进程内部的各个核心服务`AMS`、`WMS`、`PKMS`等，都有各自的对象锁和工作线程，各个服务运行时相互之间存在交互，可能出现某个线程持锁执行耗时操作而其它线程陷入长时间锁等待的情况。
+
+Input事件处理引起卡顿:
+
+屏幕驱动上报的Input事件要经过框架的InputReader和InputDispatcher线程的读取与分发，然后通过Socket发送到应用进程中，再经过界面View控件树的层层分发后消费处理。这个过程中任意一个流程出现阻塞就能造成用户的触控操作得不到及时的响应，出现用户感知的系统反应延迟或卡顿现象。
+
+应用UI线程耗时引起卡顿:
+
+UI线程耗时过长导致Vsync周期内应用上帧出现超时。特别是屏幕高刷时代的到来，留给应用UI线程处理上帧任务的时长越来越短。
+SurfaceFlinger耗时引起卡顿:
+
+SurfaceFlinger在Android系统的整个图形显示系统中是起到一个承上、启下的作用，负责收集不同应用进程Surface的绘制缓存数据进行的合成，然后发送到显示设备。所以，如果SurfaceFlinger的处理流程上出现耗时或阻塞，必然会导致整个应用的上帧显示的流程出现超时而掉帧。
+
+CPU调度引起卡顿:
+CPU算力资源是系统内的公共资源,每个应用程序的正常运行都需要CPU的调度执行。应用之间的CPU资源抢占会引起应用卡顿
+
+GPU调度引起卡顿:
+
+应用对每一帧画面的渲染处理都离不开GPU算力的支撑
+
+低内存引起卡顿:
+
+频繁GC的STW问题（stop the world）
+
+磁盘I/O引起卡顿:
+
+上层所有的I/O 请求都会放入队列中进行合并排队处理，这样就可能引发不同应用进程之间的资源抢占问题
+
+代码解释执行耗时:
+
+Art虚拟机有两种代码执行模式：quick code 模式和 Interpreter 模式。采用quick code模式，直接执行arm 汇编指令，执行效率较高。应用部分代码还是按照Interpreter 模式执行，运行效率较低，从而产生一些性能问题。
+
+编译本身耗时:
+
+在dex2oat进程编译应用的过程中，系统会启动很多线程，消耗大量的CPU算力资源。可能会导致前台应用由于抢不到CPU算力资源，其UI线程长时间处于Runnable状态而卡顿。另外应用进程内部，Jit工作线程动态编译时持续运行，如果负载较重，持续跑到CPU大核上，也会造成CPU算力资源抢占。
+
+-->
 
 ---
 
@@ -192,21 +269,34 @@ Systrace 中执行线程时间片颜色解析
     text-indent:2em;
   }
 </style>
+---
+
+卡顿APM
+
+从监控主线程的实现原理上，主要分为两种：
+
+1、依赖主线程 Looper，监控每次 dispatchMessage 的执行耗时。（BlockCanary）
+
+2、依赖 Choreographer 模块，监控相邻两次 Vsync 事件通知的时间差。（ArgusAPM、LogMonitor）
+
+<div align="center">
+  <img src="/matrix.png" style="width:45%"/>
+</div>
+
+[Matrix的模块TraceCanary](https://github.com/Tencent/matrix/wiki/Matrix-Android-TraceCanary)
 
 
 ---
 
-### 内存相关理论和原理
-
-<br>
 <div grid="~ cols-2 gap-2">
-	<div style="box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);width:80%;margin-bottom: 25px;">
-	  <img src="/jvm-memory.jpeg" border="rounded"/>
-	  <div style=" text-align: center;padding: 10px 20px;">
+	<div style="box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);width:90%;margin-bottom: 0px;">
+	  <img src="/jvm-memory.png" border="rounded"/>
+	  <div style=" text-align: center;padding: 20px 20px;">
 	  <p>JVM虚拟机内存区域</p>
 	  </div>
 	</div>
 	<div style="font-size:small">
+    <h2>内存相关理论和原理</h2>
 		<p>JVM 内存区域主要分为线程私有区域【程序计数器、虚拟机栈、本地方法区】、线程共享区域【JAVA 堆、方法区】、直接内存。</p>
     <p>线程私有数据区域生命周期与线程相同, 依赖用户线程的启动/结束 而 创建/销毁(在 Hotspot VM内, 每个线程都与操作系统的本地线程直接映射, 因此这部分内存区域的存/否跟随本地线程的生/死对应)。</p>
     <p>线程共享区域随虚拟机的启动/关闭 而 创建/销毁</p>
@@ -216,6 +306,8 @@ Systrace 中执行线程时间片颜色解析
     </p>
 	</div>
 </div>
+
+
 
 ---
 
@@ -559,5 +651,26 @@ JVM基于栈的指令集动画演示
 <div align="center">
   <img src="/output.gif" style="width:60%"/>
 </div>
+---
 
-8位CPU运行演示
+# MAT和Profiler
+
+案例分析
+
+profiler满足一般场景下内存分析，深入内存分析需要深入研究下Mat的使用
+
+<div grid="~ cols-2 gap-2">
+	<img border="rounded" src="/mat.png">
+	<img border="rounded" src="/hprof-profiler.png">
+</div>
+
+---
+layout: center
+class: 'text-center'
+---
+
+最好的优化是开发时遵循开发规范，时刻关注写下代码的深层影响
+
+对代码运行原理的深入研究和理解是推动代码正向优化的引擎
+
+性能检测工具有助于代码运行的理解，需要深入学习和研究
